@@ -1,0 +1,61 @@
+# Atualização do sistema
+apt update && apt upgrade -y
+
+# Timezone
+timedatectl set-timezone America/Sao_Paulo
+timedatectl set-ntp true
+
+# Hostname
+hostnamectl set-hostname glpi
+
+# Hosts
+vi /etc/hosts
+
+# IP fixo (netplan)
+vi /etc/netplan/50-cloud-init.yaml
+network:
+  version: 2
+  ethernets:
+    enp0s3:
+      dhcp4: no
+      addresses:
+        - 192.168.1.74/24
+      routes:
+        - to: default
+          via: 192.168.1.254
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 1.1.1.1
+
+netplan apply
+
+# Desabilitar cloud-init (rede)
+vi /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+
+# Pacotes básicos
+apt install -y htop curl wget vim unzip zip net-tools ca-certificates lsb-release
+
+# SSH
+vi /etc/ssh/sshd_config
+systemctl restart ssh
+
+# Firewall
+ufw enable
+ufw allow ssh
+ufw allow 80
+ufw allow 443
+ufw status verbose
+
+# Usuário administrativo
+adduser admin
+usermod -aG sudo admin
+
+# Verificações
+ip a
+ip route
+df -h
+lsblk
+
+# Reinício final
+reboot
