@@ -1,0 +1,15 @@
+Aqui está o resumo direto do que foi feito para liberar o acesso no DBeaver:
+
+Acesso ao arquivo: nano /etc/mysql/mariadb.conf.d/50-server.cnf
+
+Alteração de IP: Mudei bind-address de 127.0.0.1 para 0.0.0.0
+
+Aplicação: systemctl restart mariadb
+
+Permissão SQL: GRANT ALL PRIVILEGES ON glpi.* TO 'glpi'@'%' IDENTIFIED BY 'senha';
+
+Sincronização: FLUSH PRIVILEGES;
+
+Firewall: ufw allow 3306/tcp
+
+Conexão: No DBeaver, usei o IP 192.168.1.74, banco glpi, usuário glpi e senha senha.
