@@ -1,18 +1,73 @@
-# Atualização do sistema
-apt update && apt upgrade -y
+# 1 — Configuração Inicial do Ubuntu Server
 
-# Timezone
+> Este documento descreve a configuração base recomendada para um servidor Ubuntu 24.04 LTS,
+> preparando o ambiente antes de qualquer instalação de aplicação.
+
+---
+
+## 1.1 — Atualização do Sistema
+
+O primeiro passo após qualquer instalação é garantir que todos os pacotes do sistema
+estejam na versão mais recente, corrigindo vulnerabilidades e bugs conhecidos.
+
+```bash
+apt update && apt upgrade -y
+```
+
+> `apt update` atualiza a lista de pacotes disponíveis nos repositórios.
+> `apt upgrade -y` instala as atualizações encontradas, confirmando automaticamente.
+
+---
+
+## 1.2 — Configuração de Fuso Horário
+
+Define o fuso horário correto do servidor e habilita sincronização automática de horário
+via NTP (Network Time Protocol), essencial para logs e agendamentos confiáveis.
+
+```bash
 timedatectl set-timezone America/Sao_Paulo
 timedatectl set-ntp true
+```
 
-# Hostname
+---
+
+## 1.3 — Definição do Hostname
+
+O hostname é o "nome" do servidor na rede. Deve ser descritivo e único no ambiente.
+
+```bash
 hostnamectl set-hostname glpi
+```
 
-# Hosts
+Em seguida, registre o hostname no arquivo de resolução local `/etc/hosts`:
+
+```bash
 vi /etc/hosts
+```
 
-# IP fixo (netplan)
+Adicione ou ajuste a linha correspondente ao IP local do servidor:
+
+```
+127.0.0.1   localhost
+192.168.1.74   glpi
+```
+
+---
+
+## 1.4 — Configuração de IP Fixo (Netplan)
+
+Servidores devem ter endereço IP estático para garantir que seu endereço não mude ao
+reiniciar, o que quebraria o acesso ao GLPI. O Ubuntu usa o **Netplan** para isso.
+
+Edite o arquivo de configuração de rede:
+
+```bash
 vi /etc/netplan/50-cloud-init.yaml
+```
+
+Conteúdo do arquivo:
+
+```yaml
 network:
   version: 2
   ethernets:
@@ -27,35 +82,154 @@ network:
         addresses:
           - 8.8.8.8
           - 1.1.1.1
+```
 
+> Substitua `enp0s3` pelo nome correto da interface de rede do seu servidor
+> (verifique com `ip a`). O gateway (`via`) é o IP do seu roteador.
+
+Aplique as configurações:
+
+```bash
 netplan apply
+```
 
-# Desabilitar cloud-init (rede)
+### Desabilitar gerenciamento de rede pelo cloud-init
+
+Em servidores provisionados via cloud, o `cloud-init` pode sobrescrever configurações
+de rede no próximo boot. Para evitar isso:
+
+```bash
 vi /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+```
 
-# Pacotes básicos
+Adicione o conteúdo:
+
+```
+network: {config: disabled}
+```
+
+---
+
+## 1.5 — Instalação de Pacotes Essenciais
+
+Ferramentas básicas que facilitam a administração do servidor e são dependências comuns
+de diversas aplicações.
+
+```bash
 apt install -y htop curl wget vim unzip zip net-tools ca-certificates lsb-release
+```
 
-# SSH
+| Pacote | Finalidade |
+|---|---|
+| `htop` | Monitor de processos interativo |
+| `curl` / `wget` | Download de arquivos e requisições HTTP |
+| `vim` | Editor de texto avançado no terminal |
+| `unzip` / `zip` | Compressão e extração de arquivos |
+| `net-tools` | Ferramentas de rede (ex: `ifconfig`) |
+| `ca-certificates` | Certificados raiz para conexões HTTPS |
+| `lsb-release` | Informações da distribuição Linux |
+
+---
+
+## 1.6 — Configuração do SSH
+
+O SSH é o protocolo utilizado para acesso remoto seguro ao servidor. Ajustes no arquivo
+de configuração aumentam a segurança do serviço.
+
+```bash
 vi /etc/ssh/sshd_config
-systemctl restart ssh
+```
 
-# Firewall
+Configurações recomendadas:
+
+```
+# Desabilitar login direto como root
+PermitRootLogin no
+
+# Limitar tentativas de autenticação
+MaxAuthTries 3
+
+# Desabilitar autenticação por senha (recomendado, usar chaves SSH)
+# PasswordAuthentication no
+```
+
+Reinicie o serviço para aplicar:
+
+```bash
+systemctl restart ssh
+```
+
+---
+
+## 1.7 — Configuração do Firewall (UFW)
+
+O **UFW** (Uncomplicated Firewall) é a interface simplificada para o iptables no Ubuntu.
+Deve-se liberar apenas as portas necessárias para o funcionamento do servidor.
+
+```bash
+# Habilitar o firewall
 ufw enable
+
+# Liberar acesso SSH (IMPORTANTE: fazer isso antes de habilitar o firewall)
 ufw allow ssh
+
+# Liberar HTTP e HTTPS para o GLPI
 ufw allow 80
 ufw allow 443
+
+# Verificar as regras ativas
 ufw status verbose
+```
 
-# Usuário administrativo
+> ⚠️ **Atenção:** Sempre libere a porta SSH **antes** de ativar o firewall,
+> para não perder o acesso remoto ao servidor.
+
+---
+
+## 1.8 — Criação de Usuário Administrativo
+
+Por boas práticas, operações administrativas não devem ser realizadas diretamente
+como `root`. Crie um usuário dedicado com privilégios `sudo`:
+
+```bash
+# Criar o usuário (o comando solicitará uma senha)
 adduser admin
+
+# Adicionar ao grupo sudo para ter privilégios administrativos
 usermod -aG sudo admin
+```
 
-# Verificações
+---
+
+## 1.9 — Verificações Finais
+
+Confirme que todas as configurações foram aplicadas corretamente antes de continuar:
+
+```bash
+# Verificar interfaces de rede e IP configurado
 ip a
-ip route
-df -h
-lsblk
 
-# Reinício final
+# Verificar rota padrão (gateway)
+ip route
+
+# Verificar uso de disco
+df -h
+
+# Listar dispositivos de armazenamento
+lsblk
+```
+
+---
+
+## 1.10 — Reinicialização
+
+Após todas as configurações, reinicie o servidor para garantir que tudo seja carregado
+corretamente, especialmente o kernel atualizado:
+
+```bash
 reboot
+```
+
+---
+
+**Próximo passo:** [2 — Instalação do GLPI](./2-instalar_glpi.md)
