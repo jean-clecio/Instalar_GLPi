@@ -1,15 +1,163 @@
-Aqui está o resumo direto do que foi feito para liberar o acesso no DBeaver:
+# 3 — Acesso Remoto ao MariaDB com DBeaver
 
-Acesso ao arquivo: nano /etc/mysql/mariadb.conf.d/50-server.cnf
+> Por padrão, o MariaDB aceita conexões apenas localmente (loopback `127.0.0.1`).
+> Este documento descreve como configurá-lo para aceitar conexões de outros dispositivos
+> na rede, permitindo a administração visual do banco via **DBeaver**.
 
-Alteração de IP: Mudei bind-address de 127.0.0.1 para 0.0.0.0
+---
 
-Aplicação: systemctl restart mariadb
+## O que é o DBeaver?
 
-Permissão SQL: GRANT ALL PRIVILEGES ON glpi.* TO 'glpi'@'%' IDENTIFIED BY 'senha';
+O **DBeaver** é um cliente gráfico gratuito para administração de bancos de dados.
+Ele permite visualizar tabelas, executar queries SQL e gerenciar dados de forma visual,
+sem precisar usar o terminal. É instalado na máquina do administrador (não no servidor).
 
-Sincronização: FLUSH PRIVILEGES;
+---
 
-Firewall: ufw allow 3306/tcp
+## ⚠️ Aviso de Segurança
 
-Conexão: No DBeaver, usei o IP 192.168.1.74, banco glpi, usuário glpi e senha senha.
+Abrir o banco de dados para conexões remotas aumenta a superfície de ataque do servidor.
+Esta configuração é adequada para **ambientes de desenvolvimento e redes internas**.
+Em produção, prefira acessar o banco via **túnel SSH** ou **VPN**.
+
+---
+
+## Passo 1 — Alterar o endereço de escuta do MariaDB
+
+O arquivo de configuração do MariaDB define em qual endereço IP o serviço aceita
+conexões. Por padrão, está restrito ao endereço local (`127.0.0.1`).
+
+Abra o arquivo de configuração:
+
+```bash
+nano /etc/mysql/mariadb.conf.d/50-server.cnf
+```
+
+Localize a linha `bind-address` e altere seu valor:
+
+```ini
+# Antes (apenas conexões locais):
+bind-address = 127.0.0.1
+
+# Depois (aceita conexões de qualquer IP):
+bind-address = 0.0.0.0
+```
+
+> O valor `0.0.0.0` instrui o MariaDB a escutar em todas as interfaces de rede
+> disponíveis no servidor. Isso permite conexões vindas de outros dispositivos.
+
+---
+
+## Passo 2 — Reiniciar o serviço MariaDB
+
+Para que a alteração entre em vigor, o serviço precisa ser reiniciado:
+
+```bash
+systemctl restart mariadb
+```
+
+Verifique se o serviço está ativo:
+
+```bash
+systemctl status mariadb
+```
+
+---
+
+## Passo 3 — Conceder permissão de acesso remoto ao usuário
+
+O usuário `glpi` criado durante a instalação do GLPI só tem permissão para conectar
+a partir de `localhost`. É necessário criar uma permissão adicional para conexões remotas.
+
+Acesse o console do MariaDB:
+
+```bash
+mysql -u root
+```
+
+Execute os comandos SQL:
+
+```sql
+-- Permite que o usuário 'glpi' conecte de qualquer host (%)
+GRANT ALL PRIVILEGES ON glpi.* TO 'glpi'@'%' IDENTIFIED BY 'senha';
+
+-- Aplica as permissões imediatamente, sem precisar reiniciar
+FLUSH PRIVILEGES;
+
+-- Saia do console
+EXIT;
+```
+
+> O caractere `%` funciona como coringa e representa "qualquer endereço IP".
+> Para maior segurança, substitua por um IP específico, ex: `'glpi'@'192.168.1.100'`.
+
+---
+
+## Passo 4 — Liberar a porta no Firewall
+
+A porta padrão do MySQL/MariaDB é a **3306**. Ela precisa estar liberada no UFW:
+
+```bash
+ufw allow 3306/tcp
+```
+
+Confirme que a regra foi aplicada:
+
+```bash
+ufw status verbose
+```
+
+---
+
+## Passo 5 — Configurar a conexão no DBeaver
+
+Com o servidor configurado, abra o DBeaver na sua máquina e crie uma nova conexão:
+
+1. Clique em **"Nova Conexão"** (ícone de plug com `+`)
+2. Selecione o driver **MariaDB** (ou MySQL, caso MariaDB não apareça)
+3. Preencha os campos conforme abaixo:
+
+| Campo | Valor |
+|---|---|
+| **Host** | `192.168.1.74` (IP do servidor) |
+| **Porta** | `3306` |
+| **Banco de dados** | `glpi` |
+| **Usuário** | `glpi` |
+| **Senha** | `senha` |
+
+4. Clique em **"Testar Conexão"** para validar
+5. Clique em **"Concluir"**
+
+---
+
+## Verificação — Confirmando que a porta está aberta
+
+A partir da máquina do DBeaver, você pode verificar a conectividade antes de tentar
+conectar pelo cliente:
+
+```bash
+# No Windows (PowerShell):
+Test-NetConnection -ComputerName 192.168.1.74 -Port 3306
+
+# No Linux/macOS:
+nc -zv 192.168.1.74 3306
+```
+
+Se a resposta for `open` ou `succeeded`, a conexão está funcionando.
+
+---
+
+## Solução de Problemas
+
+**Erro: "Host ... is not allowed to connect"**
+> O usuário não tem permissão para conectar remotamente. Repita o Passo 3.
+
+**Erro: "Connection refused" / porta fechada**
+> Verifique se o `bind-address` foi alterado, se o serviço foi reiniciado e se o firewall libera a porta 3306.
+
+**Erro: "Access denied for user 'glpi'@..."**
+> A senha está incorreta ou o `FLUSH PRIVILEGES` não foi executado. Repita o Passo 3.
+
+---
+
+**Voltar para:** [README — Visão Geral](./README.md)
