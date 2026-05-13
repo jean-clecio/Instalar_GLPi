@@ -1,33 +1,100 @@
+# 2 — Instalação do GLPI 11 no Ubuntu Server 24.04
+
+> Script de instalação automatizada do **GLPI 11.0.0** utilizando Nginx como servidor web,
+> PHP 8.3 como interpretador e MariaDB como banco de dados.
+
+---
+
+## Visão Geral da Stack
+
+```
+[ Navegador do Usuário ]
+         │  HTTP (porta 80)
+         ▼
+      [ Nginx ]          ← Servidor web, recebe e roteia as requisições
+         │  FastCGI
+         ▼
+    [ PHP 8.3-FPM ]      ← Processa o código PHP do GLPI
+         │  SQL
+         ▼
+    [ MariaDB ]          ← Banco de dados com informações do GLPI
+```
+
+---
+
+## Estrutura de Diretórios Pós-instalação
+
+| Diretório | Conteúdo |
+|---|---|
+| `/var/www/glpi/public/` | Raiz pública do Nginx (único diretório exposto) |
+| `/etc/glpi/` | Arquivos de configuração da aplicação |
+| `/var/lib/glpi/` | Arquivos enviados pelos usuários (anexos, etc.) |
+| `/var/log/glpi/` | Logs da aplicação |
+
+> Esta estrutura segue as recomendações oficiais do GLPI para separar
+> a raiz web dos dados e configurações sensíveis.
+
+---
+
+## Script de Instalação
+
+Salve o conteúdo abaixo em um arquivo (ex: `install-glpi.sh`), torne-o executável
+com `chmod +x install-glpi.sh` e execute como root ou com `sudo bash install-glpi.sh`.
+
+```bash
 #!/bin/bash
 
 echo "#########################################################"
 echo " Script Profissional: GLPI 11 no Ubuntu 24.04 (PHP 8.3)"
 echo "#########################################################"
 
-# 1. Atualiza repositórios
+# ─────────────────────────────────────────────────────────────
+# PASSO 1 — Atualização do sistema
+# Garante que o sistema está atualizado antes de instalar novos pacotes.
+# ─────────────────────────────────────────────────────────────
 sudo apt update && sudo apt upgrade -y
 
-# 2. Instala dependências (PHP 8.3 é o padrão do Ubuntu 24.04)
+# ─────────────────────────────────────────────────────────────
+# PASSO 2 — Instalação das dependências
+# Instala o Nginx (servidor web), MariaDB (banco de dados) e todas
+# as extensões PHP exigidas pelo GLPI 11.
+# ─────────────────────────────────────────────────────────────
 sudo apt install -y nginx mariadb-server mariadb-client php-fpm php-dom php-fileinfo \
-php-curl php-gd php-intl php-mysqli php-bz2 php-zip php-exif php-ldap php-opcache \
-php-mbstring php-bcmath php-xml
+  php-curl php-gd php-intl php-mysqli php-bz2 php-zip php-exif php-ldap php-opcache \
+  php-mbstring php-bcmath php-xml
 
-# 3. Criar banco de dados com a senha definida como 'senha'
+# ─────────────────────────────────────────────────────────────
+# PASSO 3 — Criação do banco de dados e usuário MySQL
+# Cria o banco 'glpi', o usuário 'glpi' com senha definida,
+# e concede as permissões necessárias.
+# ─────────────────────────────────────────────────────────────
 sudo mysql -e "CREATE DATABASE glpi CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 sudo mysql -e "GRANT ALL PRIVILEGES ON glpi.* TO 'glpi'@'localhost' IDENTIFIED BY 'senha';"
 sudo mysql -e "GRANT SELECT ON mysql.time_zone_name TO 'glpi'@'localhost';"
 sudo mysql -e "FLUSH PRIVILEGES;"
 
-# 4. Carregar timezones no MySQL
+# ─────────────────────────────────────────────────────────────
+# PASSO 4 — Carregamento de timezones no MySQL
+# O GLPI exige que as informações de fuso horário estejam
+# disponíveis no banco para funcionar corretamente.
+# ─────────────────────────────────────────────────────────────
 mysql_tzinfo_to_sql /usr/share/zoneinfo | sudo mysql -u root mysql
 
-# 5. Configuração de performance e segurança do PHP 8.3
-sudo sed -i 's/^session.cookie_httponly =/session.cookie_httponly = on/' /etc/php/8.3/fpm/php.ini
-sudo sed -i 's/^;date.timezone =/date.timezone = America\/Sao_Paulo/' /etc/php/8.3/fpm/php.ini
-sudo sed -i 's/memory_limit = 128M/memory_limit = 512M/' /etc/php/8.3/fpm/php.ini
-sudo sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 20M/' /etc/php/8.3/fpm/php.ini
+# ─────────────────────────────────────────────────────────────
+# PASSO 5 — Ajustes de performance e segurança no PHP 8.3
+# Aumenta limites de memória e upload, define o timezone correto
+# e habilita cookie httponly (proteção contra XSS).
+# ─────────────────────────────────────────────────────────────
+sudo sed -i 's/^session.cookie_httponly =/session.cookie_httponly = on/'   /etc/php/8.3/fpm/php.ini
+sudo sed -i 's/^;date.timezone =/date.timezone = America\/Sao_Paulo/'      /etc/php/8.3/fpm/php.ini
+sudo sed -i 's/memory_limit = 128M/memory_limit = 512M/'                   /etc/php/8.3/fpm/php.ini
+sudo sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 20M/'        /etc/php/8.3/fpm/php.ini
 
-# 6. Criar configuração do Nginx (Corrigido para PHP 8.3 e GLPI 11)
+# ─────────────────────────────────────────────────────────────
+# PASSO 6 — Configuração do Nginx
+# Define o virtual host para o GLPI. O Nginx serve apenas os
+# arquivos da pasta /public e delega o PHP ao php8.3-fpm.
+# ─────────────────────────────────────────────────────────────
 cat << "EOF" | sudo tee /etc/nginx/sites-available/default
 server {
     listen 80;
@@ -48,18 +115,30 @@ server {
 }
 EOF
 
-# 7. Download do GLPI 11.0.0
+# ─────────────────────────────────────────────────────────────
+# PASSO 7 — Download e extração do GLPI 11.0.0
+# Faz o download do pacote oficial do GLPI do GitHub
+# e o extrai para o diretório de aplicações web.
+# ─────────────────────────────────────────────────────────────
 cd /tmp
 wget https://github.com/glpi-project/glpi/releases/download/11.0.0/glpi-11.0.0.tgz
 tar -zxf glpi-11.0.0.tgz
 sudo mv glpi /var/www/glpi
 
-# 8. Mover pastas sensíveis para locais seguros (Padrão Profissional)
-sudo mv /var/www/glpi/files /var/lib/glpi
+# ─────────────────────────────────────────────────────────────
+# PASSO 8 — Separação de diretórios sensíveis
+# Move pastas com dados e configurações para fora da raiz web,
+# seguindo as recomendações de segurança do GLPI.
+# ─────────────────────────────────────────────────────────────
+sudo mv /var/www/glpi/files  /var/lib/glpi
 sudo mv /var/www/glpi/config /etc/glpi
 sudo mkdir -p /var/log/glpi
 
-# 9. Criar arquivos de roteamento de diretórios (downstream e local_define)
+# ─────────────────────────────────────────────────────────────
+# PASSO 9 — Arquivos de roteamento de diretórios
+# Informa ao GLPI onde encontrar suas pastas de configuração,
+# dados e logs, já que foram movidas do local padrão.
+# ─────────────────────────────────────────────────────────────
 cat << "EOF" | sudo tee /var/www/glpi/inc/downstream.php
 <?php
 define('GLPI_CONFIG_DIR', '/etc/glpi/');
@@ -74,17 +153,75 @@ define('GLPI_VAR_DIR', '/var/lib/glpi');
 define('GLPI_LOG_DIR', '/var/log/glpi');
 EOF
 
-# 10. Permissões de segurança
+# ─────────────────────────────────────────────────────────────
+# PASSO 10 — Permissões de segurança
+# Define o proprietário e as permissões corretas nos arquivos.
+# O usuário 'www-data' é o que o Nginx/PHP usa para ler e
+# escrever arquivos — apenas ele deve ter acesso de escrita.
+# ─────────────────────────────────────────────────────────────
 sudo chown -R root:root /var/www/glpi
 sudo chown -R www-data:www-data /etc/glpi /var/lib/glpi /var/log/glpi /var/www/glpi/marketplace
 sudo find /var/www/glpi/ -type d -exec chmod 0755 {} \;
 sudo find /var/www/glpi/ -type f -exec chmod 0644 {} \;
 
-# 11. Instalação via linha de comando (CLI)
+# ─────────────────────────────────────────────────────────────
+# PASSO 11 — Instalação via CLI
+# Executa o instalador do GLPI pela linha de comando,
+# criando as tabelas do banco e configurando a aplicação.
+# ─────────────────────────────────────────────────────────────
 sudo php /var/www/glpi/bin/console db:install \
-    --db-host=localhost --db-name=glpi --db-user=glpi --db-password=senha --no-interaction
+    --db-host=localhost \
+    --db-name=glpi \
+    --db-user=glpi \
+    --db-password=senha \
+    --no-interaction
 
-# 12. Reiniciar serviços
+# ─────────────────────────────────────────────────────────────
+# PASSO 12 — Reinicialização dos serviços
+# Garante que Nginx, PHP e MariaDB estejam rodando com as
+# configurações atualizadas.
+# ─────────────────────────────────────────────────────────────
 sudo systemctl restart nginx php8.3-fpm mariadb
 
-echo "INSTALAÇÃO FINALIZADA! Acesse http://$(hostname -I | awk '{print $1}')"
+echo ""
+echo "✅ INSTALAÇÃO FINALIZADA!"
+echo "   Acesse: http://$(hostname -I | awk '{print $1}')"
+```
+
+---
+
+## Credenciais Padrão do GLPI
+
+Após a instalação, acesse o GLPI com as credenciais padrão abaixo e **troque imediatamente**:
+
+| Usuário | Senha | Perfil |
+|---|---|---|
+| `glpi` | `glpi` | Administrador |
+| `tech` | `tech` | Técnico |
+| `normal` | `normal` | Usuário normal |
+| `post-only` | `postonly` | Somente abertura de chamados |
+
+---
+
+## Solução de Problemas Comuns
+
+**Erro de permissão ao acessar via navegador:**
+```bash
+sudo chown -R www-data:www-data /var/lib/glpi /var/log/glpi /etc/glpi
+```
+
+**Nginx não inicia:**
+```bash
+nginx -t   # Verifica a sintaxe do arquivo de configuração
+journalctl -xe -u nginx   # Exibe logs de erro do serviço
+```
+
+**PHP-FPM não conecta:**
+```bash
+systemctl status php8.3-fpm
+ls /run/php/   # Verifica se o socket php8.3-fpm.sock existe
+```
+
+---
+
+**Próximo passo:** [3 — Acesso remoto ao banco com DBeaver](./3-MariaDB_e_Dbeaver.md)
